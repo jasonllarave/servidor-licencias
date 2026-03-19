@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from passlib.context import CryptContext
+from apscheduler.schedulers.background import BackgroundScheduler
 import os, uuid, random
 
 load_dotenv()
@@ -80,6 +81,19 @@ class Pago(Base):
     referencia  = Column(String, nullable=True)
 
 Base.metadata.create_all(bind=engine)
+
+def reset_requests_diarios():
+    db = SessionLocal()
+    try:
+        db.query(ApiKeyPool).update({"requests_hoy": 0})
+        db.commit()
+        print(f"[{datetime.utcnow()}] Reset diario de requests completado.")
+    finally:
+        db.close()
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(reset_requests_diarios, "cron", hour=0, minute=0)
+scheduler.start()
 
 def get_db():
     db = SessionLocal()
