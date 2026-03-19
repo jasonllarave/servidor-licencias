@@ -3,7 +3,8 @@ uvicorn
 sqlalchemy
 psycopg2-binary
 python-dotenv
-passlib
+passlib[bcrypt]
 python-jose
 httpx
 apscheduler
+bcrypt

@@ -274,6 +274,46 @@ def dashboard(db: Session = Depends(get_db)):
         "top_usuarios_tokens": [{"correo": c, "tokens": t} for c, t in top_5]
     }
 
+    @app.post("/pagos/wompi")
+async def webhook_wompi(datos: dict, db: Session = Depends(get_db)):
+    try:
+        evento = datos.get("event", "")
+        if evento != "transaction.updated":
+            return {"ok": True}
+        
+        transaccion = datos.get("data", {}).get("transaction", {})
+        estado = transaccion.get("status", "")
+        
+        if estado != "APPROVED":
+            return {"ok": True}
+        
+        # Referencia = clave de licencia que envías al crear el link de pago
+        referencia = transaccion.get("reference", "")
+        monto = transaccion.get("amount_in_cents", 0) // 100
+        
+        licencia = db.query(Licencia).filter(Licencia.clave == referencia).first()
+        if not licencia:
+            return {"ok": False, "mensaje": "Licencia no encontrada"}
+        
+        # Activar y renovar 30 días
+        licencia.estado = "activa"
+        licencia.fecha_vence = datetime.utcnow() + timedelta(days=30)
+        licencia.es_prueba = False
+        
+        # Registrar pago
+        pago = Pago(
+            usuario_id=licencia.usuario_id,
+            monto=monto,
+            referencia=referencia
+        )
+        db.add(pago)
+        db.commit()
+        
+        return {"ok": True, "mensaje": f"Licencia {referencia} activada"}
+    
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @app.post("/admin/cupon/crear", dependencies=[Depends(verificar_admin)])
 def crear_cupon(datos: dict, db: Session = Depends(get_db)):
     cupon = Cupon(
