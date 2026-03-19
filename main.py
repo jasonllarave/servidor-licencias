@@ -22,6 +22,7 @@ app = FastAPI(title="Servidor de Licencias - AsistenteIA")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+
 class Usuario(Base):
     __tablename__ = "usuarios"
     id             = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -31,6 +32,7 @@ class Usuario(Base):
     plan           = Column(String, default="basico")
     referido_por   = Column(String, nullable=True)
     fecha_registro = Column(DateTime, default=datetime.utcnow)
+
 
 class Licencia(Base):
     __tablename__ = "licencias"
@@ -43,6 +45,7 @@ class Licencia(Base):
     es_prueba      = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
 
+
 class ApiKeyPool(Base):
     __tablename__ = "api_keys_pool"
     id                 = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -51,6 +54,7 @@ class ApiKeyPool(Base):
     usuarios_asignados = Column(Integer, default=0)
     requests_hoy       = Column(Integer, default=0)
     activa             = Column(Boolean, default=True)
+
 
 class LogTokens(Base):
     __tablename__ = "log_tokens"
@@ -62,6 +66,7 @@ class LogTokens(Base):
     tarea         = Column(String)
     fecha         = Column(DateTime, default=datetime.utcnow)
 
+
 class Cupon(Base):
     __tablename__ = "cupones"
     codigo        = Column(String, primary_key=True)
@@ -70,6 +75,7 @@ class Cupon(Base):
     usos_actuales = Column(Integer, default=0)
     fecha_vence   = Column(DateTime)
     activo        = Column(Boolean, default=True)
+
 
 class Pago(Base):
     __tablename__ = "pagos"
@@ -80,8 +86,11 @@ class Pago(Base):
     fecha_pago  = Column(DateTime, default=datetime.utcnow)
     referencia  = Column(String, nullable=True)
 
+
 Base.metadata.create_all(bind=engine)
 
+
+# ---- Reset diario de API keys ----
 def reset_requests_diarios():
     db = SessionLocal()
     try:
@@ -94,6 +103,8 @@ def reset_requests_diarios():
 scheduler = BackgroundScheduler()
 scheduler.add_job(reset_requests_diarios, "cron", hour=0, minute=0)
 scheduler.start()
+# ----------------------------------
+
 
 def get_db():
     db = SessionLocal()
@@ -102,9 +113,11 @@ def get_db():
     finally:
         db.close()
 
+
 def verificar_admin(x_admin_secret: str = Header(...)):
     if x_admin_secret != SECRET_ADMIN:
         raise HTTPException(status_code=403, detail="No autorizado")
+
 
 def obtener_key_disponible(db: Session):
     keys = db.query(ApiKeyPool).filter(
@@ -117,9 +130,11 @@ def obtener_key_disponible(db: Session):
     db.commit()
     return key.api_key
 
+
 @app.get("/")
 def root():
     return {"status": "ok", "mensaje": "Servidor de licencias AsistenteIA"}
+
 
 @app.post("/registro")
 def registrar_usuario(datos: dict, db: Session = Depends(get_db)):
@@ -150,6 +165,7 @@ def registrar_usuario(datos: dict, db: Session = Depends(get_db)):
         "prueba_gratis_dias": 30
     }
 
+
 @app.get("/validar/{clave}")
 def validar_licencia(clave: str, db: Session = Depends(get_db)):
     licencia = db.query(Licencia).filter(Licencia.clave == clave).first()
@@ -170,6 +186,7 @@ def validar_licencia(clave: str, db: Session = Depends(get_db)):
         "dias_restantes": (licencia.fecha_vence - datetime.utcnow()).days
     }
 
+
 @app.post("/log/tokens")
 def registrar_tokens(datos: dict, db: Session = Depends(get_db)):
     log = LogTokens(
@@ -183,6 +200,7 @@ def registrar_tokens(datos: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True}
 
+
 @app.post("/cupon/validar")
 def validar_cupon(datos: dict, db: Session = Depends(get_db)):
     cupon = db.query(Cupon).filter(Cupon.codigo == datos["codigo"].upper()).first()
@@ -193,6 +211,45 @@ def validar_cupon(datos: dict, db: Session = Depends(get_db)):
     if cupon.usos_actuales >= cupon.usos_maximos:
         return {"valido": False, "mensaje": "Cupon agotado"}
     return {"valido": True, "descuento": cupon.descuento}
+
+
+@app.post("/pagos/wompi")
+async def webhook_wompi(datos: dict, db: Session = Depends(get_db)):
+    try:
+        evento = datos.get("event", "")
+        if evento != "transaction.updated":
+            return {"ok": True}
+
+        transaccion = datos.get("data", {}).get("transaction", {})
+        estado = transaccion.get("status", "")
+
+        if estado != "APPROVED":
+            return {"ok": True}
+
+        referencia = transaccion.get("reference", "")
+        monto = transaccion.get("amount_in_cents", 0) // 100
+
+        licencia = db.query(Licencia).filter(Licencia.clave == referencia).first()
+        if not licencia:
+            return {"ok": False, "mensaje": "Licencia no encontrada"}
+
+        licencia.estado = "activa"
+        licencia.fecha_vence = datetime.utcnow() + timedelta(days=30)
+        licencia.es_prueba = False
+
+        pago = Pago(
+            usuario_id=licencia.usuario_id,
+            monto=monto,
+            referencia=referencia
+        )
+        db.add(pago)
+        db.commit()
+
+        return {"ok": True, "mensaje": f"Licencia {referencia} activada"}
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 @app.get("/admin/usuarios", dependencies=[Depends(verificar_admin)])
 def listar_usuarios(db: Session = Depends(get_db)):
@@ -217,6 +274,7 @@ def listar_usuarios(db: Session = Depends(get_db)):
         })
     return resultado
 
+
 @app.post("/admin/suspender", dependencies=[Depends(verificar_admin)])
 def suspender_licencia(datos: dict, db: Session = Depends(get_db)):
     licencia = db.query(Licencia).filter(Licencia.clave == datos["clave"]).first()
@@ -225,6 +283,7 @@ def suspender_licencia(datos: dict, db: Session = Depends(get_db)):
     licencia.estado = "suspendida"
     db.commit()
     return {"mensaje": f"Licencia {datos['clave']} suspendida"}
+
 
 @app.post("/admin/activar", dependencies=[Depends(verificar_admin)])
 def activar_licencia(datos: dict, db: Session = Depends(get_db)):
@@ -237,6 +296,7 @@ def activar_licencia(datos: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": f"Licencia {datos['clave']} activada por 30 dias"}
 
+
 @app.post("/admin/keys/agregar", dependencies=[Depends(verificar_admin)])
 def agregar_key(datos: dict, db: Session = Depends(get_db)):
     key = ApiKeyPool(
@@ -247,11 +307,13 @@ def agregar_key(datos: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": "API key agregada al pool"}
 
+
 @app.get("/admin/keys", dependencies=[Depends(verificar_admin)])
 def listar_keys(db: Session = Depends(get_db)):
     keys = db.query(ApiKeyPool).all()
     return [{"id": k.id, "correo": k.correo_cuenta, "usuarios": k.usuarios_asignados,
              "requests_hoy": k.requests_hoy, "activa": k.activa} for k in keys]
+
 
 @app.get("/admin/dashboard", dependencies=[Depends(verificar_admin)])
 def dashboard(db: Session = Depends(get_db)):
@@ -274,45 +336,6 @@ def dashboard(db: Session = Depends(get_db)):
         "top_usuarios_tokens": [{"correo": c, "tokens": t} for c, t in top_5]
     }
 
-    @app.post("/pagos/wompi")
-async def webhook_wompi(datos: dict, db: Session = Depends(get_db)):
-    try:
-        evento = datos.get("event", "")
-        if evento != "transaction.updated":
-            return {"ok": True}
-        
-        transaccion = datos.get("data", {}).get("transaction", {})
-        estado = transaccion.get("status", "")
-        
-        if estado != "APPROVED":
-            return {"ok": True}
-        
-        # Referencia = clave de licencia que envías al crear el link de pago
-        referencia = transaccion.get("reference", "")
-        monto = transaccion.get("amount_in_cents", 0) // 100
-        
-        licencia = db.query(Licencia).filter(Licencia.clave == referencia).first()
-        if not licencia:
-            return {"ok": False, "mensaje": "Licencia no encontrada"}
-        
-        # Activar y renovar 30 días
-        licencia.estado = "activa"
-        licencia.fecha_vence = datetime.utcnow() + timedelta(days=30)
-        licencia.es_prueba = False
-        
-        # Registrar pago
-        pago = Pago(
-            usuario_id=licencia.usuario_id,
-            monto=monto,
-            referencia=referencia
-        )
-        db.add(pago)
-        db.commit()
-        
-        return {"ok": True, "mensaje": f"Licencia {referencia} activada"}
-    
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
 @app.post("/admin/cupon/crear", dependencies=[Depends(verificar_admin)])
 def crear_cupon(datos: dict, db: Session = Depends(get_db)):
