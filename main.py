@@ -183,7 +183,11 @@ def validar_licencia(clave: str, db: Session = Depends(get_db)):
         "plan": licencia.plan,
         "fecha_vence": licencia.fecha_vence.isoformat(),
         "api_key": api_key,
-        "dias_restantes": (licencia.fecha_vence - datetime.utcnow()).days
+        "dias_restantes": (licencia.fecha_vence - datetime.utcnow()).days,
+        "google_client_id":     os.getenv("GOOGLE_CLIENT_ID", ""),
+        "google_client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+        "azure_client_id":      os.getenv("AZURE_CLIENT_ID", ""),
+        "azure_tenant_id":      os.getenv("AZURE_TENANT_ID", ""),
     }
 
 
