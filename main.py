@@ -44,6 +44,7 @@ class Licencia(Base):
     fecha_vence    = Column(DateTime)
     es_prueba      = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
+    api_key_asignada = Column(String, nullable=True)
 
 
 class ApiKeyPool(Base):
@@ -172,12 +173,24 @@ def validar_licencia(clave: str, db: Session = Depends(get_db)):
     if not licencia:
         return {"valida": False, "mensaje": "Licencia no encontrada"}
     if licencia.estado != "activa":
-        return {"valida": False, "mensaje": "Licencia suspendida. Contacta soporte."}
+        return {"valida": False, "mensaje": "Licencia suspendida."}
     if licencia.fecha_vence < datetime.utcnow():
         licencia.estado = "vencida"
         db.commit()
-        return {"valida": False, "mensaje": "Licencia vencida. Renueva en tudominio.com"}
-    api_key = obtener_key_disponible(db)
+        return {"valida": False, "mensaje": "Licencia vencida."}
+
+    # Asignar key fija si no tiene una
+    if not licencia.api_key_asignada:
+        key_obj = db.query(ApiKeyPool).filter(
+            ApiKeyPool.activa == True
+        ).order_by(ApiKeyPool.usuarios_asignados.asc()).first()
+        if key_obj:
+            licencia.api_key_asignada = key_obj.api_key
+            key_obj.usuarios_asignados += 1
+            db.commit()
+
+    api_key = licencia.api_key_asignada or obtener_key_disponible(db)
+
     return {
         "valida": True,
         "plan": licencia.plan,
@@ -190,6 +203,28 @@ def validar_licencia(clave: str, db: Session = Depends(get_db)):
         "azure_tenant_id":      os.getenv("AZURE_TENANT_ID", ""),
     }
 
+# En Railway - nuevo endpoint
+@app.get("/key_rotacion/{clave}")
+def key_rotacion(clave: str, db: Session = Depends(get_db)):
+    licencia = db.query(Licencia).filter(Licencia.clave == clave).first()
+    if not licencia:
+        return {"api_key": ""}
+    # Buscar la siguiente key con menos carga
+    key_obj = db.query(ApiKeyPool).filter(
+        ApiKeyPool.activa == True,
+        ApiKeyPool.api_key != licencia.api_key_asignada
+    ).order_by(ApiKeyPool.requests_hoy.asc()).first()
+    if key_obj:
+        # Actualizar asignación
+        old = db.query(ApiKeyPool).filter(
+            ApiKeyPool.api_key == licencia.api_key_asignada
+        ).first()
+        if old:
+            old.usuarios_asignados = max(0, old.usuarios_asignados - 1)
+        licencia.api_key_asignada = key_obj.api_key
+        key_obj.usuarios_asignados += 1
+        db.commit()
+    return {"api_key": licencia.api_key_asignada or ""}
 
 @app.post("/log/tokens")
 def registrar_tokens(datos: dict, db: Session = Depends(get_db)):
