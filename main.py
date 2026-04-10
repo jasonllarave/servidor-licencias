@@ -395,10 +395,10 @@ def get_modelos():
     
     # Modelos fallback por si Groq no responde
     FALLBACK = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it",
-        "mixtral-8x7b-32768",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama3-groq-70b-8192-tool-use-preview",
+    "llama3-groq-8b-8192-tool-use-preview",
     ]
     
     try:
