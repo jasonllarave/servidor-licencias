@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from apscheduler.schedulers.background import BackgroundScheduler
-import os, uuid, random
+import os, uuid, random, json
 
 load_dotenv()
 
@@ -387,3 +387,63 @@ def crear_cupon(datos: dict, db: Session = Depends(get_db)):
     db.add(cupon)
     db.commit()
     return {"mensaje": f"Cupon {cupon.codigo} creado con {cupon.descuento}% de descuento"}
+
+@app.get("/modelos")
+def get_modelos():
+    """Retorna modelos activos de Groq en tiempo real."""
+    import urllib.request
+    
+    # Modelos fallback por si Groq no responde
+    FALLBACK = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+        "mixtral-8x7b-32768",
+    ]
+    
+    try:
+        # Usar cualquier key del pool para consultar
+        db = SessionLocal()
+        key_obj = db.query(ApiKeyPool).filter(
+            ApiKeyPool.activa == True
+        ).first()
+        db.close()
+        
+        api_key = key_obj.api_key if key_obj else os.getenv("GROQ_API_KEY_BACKUP", "")
+        if not api_key:
+            return {"modelos": FALLBACK, "sin_tools": [], "fuente": "fallback"}
+        
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/models",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read().decode())
+        
+        # Filtrar solo modelos de texto que soporten tools
+        excluir = ["whisper", "vision", "tts", "guard", "distil"]
+        modelos_validos = [
+            m["id"] for m in data.get("data", [])
+            if not any(x in m["id"].lower() for x in excluir)
+        ]
+        
+        # Priorizar los mejores primero
+        prioridad = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.1-8b", "gemma2", "mixtral"]
+        def orden(m):
+            for i, p in enumerate(prioridad):
+                if p in m: return i
+            return 99
+        
+        modelos_validos.sort(key=orden)
+        
+        return {
+            "modelos": modelos_validos or FALLBACK,
+            "sin_tools": [],
+            "fuente": "groq_live"
+        }
+        
+    except Exception as e:
+        return {"modelos": FALLBACK, "sin_tools": [], "fuente": "fallback", "error": str(e)}    
