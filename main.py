@@ -390,31 +390,29 @@ def crear_cupon(datos: dict, db: Session = Depends(get_db)):
 
 @app.get("/modelos")
 def get_modelos():
-    """Retorna modelos activos de Groq en tiempo real."""
+    """Retorna modelos activos de OpenRouter en tiempo real."""
     import urllib.request
     
-    # Modelos fallback por si Groq no responde
     FALLBACK = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma-7b-it",
-]
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemma-3-27b-it:free",
+        "mistralai/mistral-7b-instruct:free",
+        "nvidia/llama-3.1-nemotron-70b-instruct:free",
+    ]
     
     try:
-        # Usar cualquier key del pool para consultar
         db = SessionLocal()
         key_obj = db.query(ApiKeyPool).filter(
             ApiKeyPool.activa == True
         ).first()
         db.close()
         
-        api_key = key_obj.api_key if key_obj else os.getenv("GROQ_API_KEY_BACKUP", "")
+        api_key = key_obj.api_key if key_obj else os.getenv("OPENROUTER_API_KEY", "")
         if not api_key:
             return {"modelos": FALLBACK, "sin_tools": [], "fuente": "fallback"}
         
         req = urllib.request.Request(
-            "https://api.groq.com/openai/v1/models",
+            "https://openrouter.ai/api/v1/models",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
@@ -423,15 +421,16 @@ def get_modelos():
         with urllib.request.urlopen(req, timeout=5) as r:
             data = json.loads(r.read().decode())
         
-        # Filtrar solo modelos de texto que soporten tools
-        excluir = ["whisper", "vision", "tts", "guard", "distil"]
+        # Filtrar solo modelos gratuitos con tool calling
         modelos_validos = [
             m["id"] for m in data.get("data", [])
-            if not any(x in m["id"].lower() for x in excluir)
+            if m["id"].endswith(":free")
+            and "context_length" in m
+            and m.get("context_length", 0) >= 8000
         ]
         
-        # Priorizar los mejores primero
-        prioridad = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.1-8b", "gemma2", "mixtral"]
+        # Priorizar los mejores
+        prioridad = ["llama-3.3", "llama-3.1-70b", "gemma-3-27b", "nemotron-70b", "mistral-7b"]
         def orden(m):
             for i, p in enumerate(prioridad):
                 if p in m: return i
@@ -440,9 +439,9 @@ def get_modelos():
         modelos_validos.sort(key=orden)
         
         return {
-            "modelos": modelos_validos or FALLBACK,
+            "modelos": modelos_validos[:5] or FALLBACK,
             "sin_tools": [],
-            "fuente": "groq_live"
+            "fuente": "openrouter_live"
         }
         
     except Exception as e:
