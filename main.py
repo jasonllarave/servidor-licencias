@@ -388,6 +388,15 @@ def crear_cupon(datos: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"mensaje": f"Cupon {cupon.codigo} creado con {cupon.descuento}% de descuento"}
 
+@app.post("/admin/keys/desactivar", dependencies=[Depends(verificar_admin)])
+def desactivar_key(datos: dict, db: Session = Depends(get_db)):
+    key = db.query(ApiKeyPool).filter(ApiKeyPool.id == datos["id"]).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key no encontrada")
+    key.activa = False
+    db.commit()
+    return {"mensaje": f"Key {datos['id']} desactivada"}    
+
 @app.get("/modelos")
 def get_modelos():
     """Retorna modelos activos de OpenRouter en tiempo real."""
