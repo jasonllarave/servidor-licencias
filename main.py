@@ -402,9 +402,10 @@ def get_modelos():
     """Retorna modelos gratuitos de OpenRouter que soportan tool calling."""
     
     FALLBACK = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "microsoft/phi-3-mini-128k-instruct:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemma-3-27b-it:free",
+        "google/gemma-3-12b-it:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
     ]
     
     # Modelos conocidos que NO soportan tools
