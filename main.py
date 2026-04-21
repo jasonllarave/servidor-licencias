@@ -411,7 +411,7 @@ def get_modelos():
     # Modelos conocidos que NO soportan tools
     SIN_TOOLS_CONOCIDOS = [
     "microsoft/phi-3-mini-128k-instruct:free",
-    "google/gemma-4-26b-a4b-it:free",
+    
     ]
 
     try:
