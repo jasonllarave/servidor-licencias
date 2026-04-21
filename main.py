@@ -399,27 +399,36 @@ def desactivar_key(datos: dict, db: Session = Depends(get_db)):
 
 @app.get("/modelos")
 def get_modelos():
-    """Retorna modelos activos de OpenRouter en tiempo real."""
-    import urllib.request
+    """Retorna modelos gratuitos de OpenRouter que soportan tool calling."""
     
     FALLBACK = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemma-3-27b-it:free",
-        "mistralai/mistral-7b-instruct:free",
-        "nvidia/llama-3.1-nemotron-70b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "google/gemma-4-27b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
     ]
     
+    # Modelos conocidos que NO soportan tools
+    SIN_TOOLS_CONOCIDOS = [
+    "microsoft/phi-3-mini-128k-instruct:free",
+    "google/gemma-4-26b-a4b-it:free",
+    ]
+
     try:
         db = SessionLocal()
         key_obj = db.query(ApiKeyPool).filter(
             ApiKeyPool.activa == True
         ).first()
         db.close()
-        
+
         api_key = key_obj.api_key if key_obj else os.getenv("OPENROUTER_API_KEY", "")
         if not api_key:
-            return {"modelos": FALLBACK, "sin_tools": [], "fuente": "fallback"}
-        
+            return {
+                "modelos": FALLBACK,
+                "sin_tools": SIN_TOOLS_CONOCIDOS,
+                "fuente": "fallback"
+            }
+
         req = urllib.request.Request(
             "https://openrouter.ai/api/v1/models",
             headers={
@@ -427,31 +436,69 @@ def get_modelos():
                 "Content-Type": "application/json"
             }
         )
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode())
-        
-        # Filtrar solo modelos gratuitos con tool calling
-        modelos_validos = [
-            m["id"] for m in data.get("data", [])
-            if m["id"].endswith(":free")
-            and "context_length" in m
-            and m.get("context_length", 0) >= 8000
+
+        sin_tools = []
+        modelos_con_tools = []
+        modelos_sin_tools = []
+
+        for m in data.get("data", []):
+            mid = m.get("id", "")
+            if not mid.endswith(":free"):
+                continue
+            if m.get("context_length", 0) < 8000:
+                continue
+
+            # Verificar soporte de tools según la respuesta de OpenRouter
+            soporta_tools = False
+            architecture = m.get("architecture", {})
+            # OpenRouter indica tool calling en el campo tokenizer o en features
+            if (
+                "tool" in str(m.get("description", "")).lower()
+                or architecture.get("tokenizer", "") in ("Llama3", "Mistral", "Gemma")
+                or m.get("top_provider", {}).get("is_moderated") is not None
+            ):
+                soporta_tools = True
+
+            # Forzar sin_tools en modelos conocidos que fallan
+            if any(x in mid for x in ["phi-3", "phi-4", "gemma-2-9b"]):
+                soporta_tools = False
+
+            if soporta_tools:
+                modelos_con_tools.append(mid)
+            else:
+                modelos_sin_tools.append(mid)
+                sin_tools.append(mid)
+
+        # Priorizar mejores modelos
+        prioridad = [
+            "llama-3.3-70b", "llama-3.1-70b", "llama-3.1-8b",
+            "nemotron-70b", "mistral-7b", "gemma-3"
         ]
-        
-        # Priorizar los mejores
-        prioridad = ["llama-3.3", "llama-3.1-70b", "gemma-3-27b", "nemotron-70b", "mistral-7b"]
+
         def orden(m):
             for i, p in enumerate(prioridad):
-                if p in m: return i
+                if p in m:
+                    return i
             return 99
-        
-        modelos_validos.sort(key=orden)
-        
+
+        modelos_con_tools.sort(key=orden)
+        modelos_sin_tools.sort(key=orden)
+
+        # Primero los que soportan tools, luego los que no
+        modelos_final = modelos_con_tools[:4] + modelos_sin_tools[:2]
+
         return {
-            "modelos": modelos_validos[:5] or FALLBACK,
-            "sin_tools": [],
+            "modelos": modelos_final or FALLBACK,
+            "sin_tools": sin_tools or SIN_TOOLS_CONOCIDOS,
             "fuente": "openrouter_live"
         }
-        
+
     except Exception as e:
-        return {"modelos": FALLBACK, "sin_tools": [], "fuente": "fallback", "error": str(e)}    
+        return {
+             "modelos": FALLBACK,
+             "sin_tools": SIN_TOOLS_CONOCIDOS,
+             "fuente": "fallback",
+             "error": str(e)
+        }    
