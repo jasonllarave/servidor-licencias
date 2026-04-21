@@ -403,15 +403,16 @@ def get_modelos():
     
     FALLBACK = [
         "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemma-3-27b-it:free",
-        "google/gemma-3-12b-it:free",
-        "nousresearch/hermes-3-llama-3.1-405b:free",
+        "openai/gpt-oss-120b:free",
+        "openai/gpt-oss-20b:free",
+        "qwen/qwen3-next-80b-a3b-instruct:free",
     ]
     
     # Modelos conocidos que NO soportan tools
     SIN_TOOLS_CONOCIDOS = [
-    "microsoft/phi-3-mini-128k-instruct:free",
-    
+        "google/gemma-3-27b-it:free",
+        "google/gemma-3-12b-it:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
     ]
 
     try:
