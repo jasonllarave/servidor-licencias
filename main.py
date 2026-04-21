@@ -404,8 +404,7 @@ def get_modelos():
     FALLBACK = [
     "meta-llama/llama-3.3-70b-instruct:free",
     "meta-llama/llama-3.1-8b-instruct:free",
-    "google/gemma-4-27b-it:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
+    "microsoft/phi-3-mini-128k-instruct:free",
     ]
     
     # Modelos conocidos que NO soportan tools
